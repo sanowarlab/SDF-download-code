@@ -84,6 +84,86 @@ print("All batches created")
         print("Error:", cid)
 
 print("All downloads finished")
+import os
+import pandas as pd
+from rdkit import Chem
+from rdkit.Chem import Descriptors, Lipinski, Crippen, rdMolDescriptors
+from rdkit.Chem.FilterCatalog import FilterCatalog, FilterCatalogParams
+from tqdm import tqdm
+
+# Input/Output paths
+input_folder = r"D:\masters project\Final Compound list\SDF_files"
+output_excel = r"D:\masters project\Final Compound list\Filtered_Plant_Compounds.xlsx"
+
+# PAINS/BRENK/NIH filter
+params = FilterCatalogParams()
+params.AddCatalog(FilterCatalogParams.FilterCatalogs.PAINS)
+params.AddCatalog(FilterCatalogParams.FilterCatalogs.BRENK)
+params.AddCatalog(FilterCatalogParams.FilterCatalogs.NIH)
+catalog = FilterCatalog(params)
+
+filtered_data = []
+
+# List all SDF files
+sdf_files = [f for f in os.listdir(input_folder) if f.endswith(".sdf")]
+sdf_files.sort()
+
+print("Filtering plant-derived compounds based on descriptors and substructure rules...")
+
+for sdf_file in tqdm(sdf_files, desc="Processing SDF files"):
+    file_path = os.path.join(input_folder, sdf_file)
+    supplier = Chem.SDMolSupplier(file_path)
+    
+    for idx, mol in enumerate(supplier):
+        if mol is None:
+            continue
+
+        # Descriptors
+        mw = Descriptors.MolWt(mol)
+        heteroatoms = rdMolDescriptors.CalcNumHeteroatoms(mol)
+        hbd = Lipinski.NumHDonors(mol)
+        hba = Lipinski.NumHAcceptors(mol)
+        rot_bonds = Lipinski.NumRotatableBonds(mol)
+        mlogp = Crippen.MolLogP(mol)
+        _, mr = rdMolDescriptors.CalcCrippenDescriptors(mol)
+        tpsa = rdMolDescriptors.CalcTPSA(mol)
+        aromatic_rings = rdMolDescriptors.CalcNumAromaticRings(mol)
+
+        # Plant-friendly filtering criteria
+        lipinski_pass = (180 <= mw <= 800) and (hbd <= 8) and (hba <= 12) and (-1 <= mlogp <= 6)
+        ghose_pass = (30 <= mr <= 200) and (-1 <= mlogp <= 6)
+        gsk_pass = (180 <= mw <= 800) and (-1 <= mlogp <= 6) and (tpsa <= 200)
+        hetero_ok = heteroatoms >= 1
+        substructure_ok = not catalog.HasMatch(mol)
+
+        # Keep only compounds passing all filters
+        if lipinski_pass and ghose_pass and gsk_pass and hetero_ok and substructure_ok:
+            cid = mol.GetProp("PUBCHEM_COMPOUND_CID") if mol.HasProp("PUBCHEM_COMPOUND_CID") else ""
+            name = mol.GetProp("PUBCHEM_IUPAC_NAME") if mol.HasProp("PUBCHEM_IUPAC_NAME") else ""
+            filtered_data.append({
+                "SDF_File": sdf_file,
+                "Mol_Index": idx + 1,
+                "Compound_Name": name,
+                "PubChem_CID": cid,
+                "MW": mw,
+                "Heteroatoms": heteroatoms,
+                "HBA": hba,
+                "HBD": hbd,
+                "Rotatable_Bonds": rot_bonds,
+                "MLogP": mlogp,
+                "MR": mr,
+                "TPSA": tpsa,
+                "Aromatic_Rings": aromatic_rings
+            })
+
+# Save filtered compounds to Excel
+df = pd.DataFrame(filtered_data)
+df.to_excel(output_excel, index=False)
+
+print(f"Filtered plant compounds saved: {output_excel}")
+print(f"Total compounds passing filters: {len(df)}")
+
+
 
 import os
 from rdkit import Chem
