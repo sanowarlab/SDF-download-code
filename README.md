@@ -162,3 +162,91 @@ for i in tqdm(range(0, len(filtered_mols), batch_size), desc="Writing batches"):
     writer.close()
 
 print("All filtered batches created successfully in one folder!")
+Filtering 
+
+import os
+import pandas as pd
+from rdkit import Chem
+from rdkit.Chem import Descriptors, Lipinski, Crippen, rdMolDescriptors
+from rdkit.Chem.FilterCatalog import FilterCatalog, FilterCatalogParams
+from tqdm import tqdm
+
+# Folders
+input_folder = r"D:\Cancer Bioinformatics\MY project\All analysis DPP3\SDF_3D"
+output_excel = r"D:\Cancer Bioinformatics\MY project\All analysis DPP3\Filtered_SDF_summary.xlsx"
+
+# PAINS/BRENK/NIH filters
+params = FilterCatalogParams()
+params.AddCatalog(FilterCatalogParams.FilterCatalogs.PAINS)
+params.AddCatalog(FilterCatalogParams.FilterCatalogs.BRENK)
+params.AddCatalog(FilterCatalogParams.FilterCatalogs.NIH)
+catalog = FilterCatalog(params)
+
+# Prepare data list
+data = []
+
+# Get all SDF files
+sdf_files = [f for f in os.listdir(input_folder) if f.endswith(".sdf")]
+sdf_files.sort()
+
+print("Filtering compounds and computing descriptors...")
+
+# Loop through all files with progress bar
+for sdf_file in tqdm(sdf_files, desc="Processing SDF files"):
+    file_path = os.path.join(input_folder, sdf_file)
+    supplier = Chem.SDMolSupplier(file_path)
+    for idx, mol in enumerate(supplier):
+        if mol is None:
+            continue
+
+        # Compute descriptors
+        mw = Descriptors.MolWt(mol)
+        heteroatoms = rdMolDescriptors.CalcNumHeteroatoms(mol)
+        hbd = Lipinski.NumHDonors(mol)
+        hba = Lipinski.NumHAcceptors(mol)
+        rot_bonds = Lipinski.NumRotatableBonds(mol)
+        mlogp = Crippen.MolLogP(mol)
+        _, mr = rdMolDescriptors.CalcCrippenDescriptors(mol)  # MR is second value
+        tpsa = rdMolDescriptors.CalcTPSA(mol)
+        aromatic_rings = rdMolDescriptors.CalcNumAromaticRings(mol)
+
+        # Lipinski/Ghose/GSK filtering
+        if not (200 <= mw <= 480):
+            continue
+        if heteroatoms <= 1:
+            continue
+        if not (40 <= mr <= 130):
+            continue
+        if not (0.4 <= mlogp <= 4.15):
+            continue
+        if not (tpsa <= 131.6):
+            continue
+        if catalog.HasMatch(mol):
+            continue
+
+        # Get PubChem CID if available
+        cid = mol.GetProp("PUBCHEM_COMPOUND_CID") if mol.HasProp("PUBCHEM_COMPOUND_CID") else ""
+
+        # Add molecule info
+        data.append({
+            "SDF_File": sdf_file,
+            "Mol_Index": idx + 1,
+            "PubChem_CID": cid,
+            "MW": mw,
+            "Heteroatoms": heteroatoms,
+            "HBA": hba,
+            "HBD": hbd,
+            "Rotatable_Bonds": rot_bonds,
+            "MLogP": mlogp,
+            "MR": mr,
+            "TPSA": tpsa,
+            "Aromatic_Rings": aromatic_rings
+        })
+
+# Convert to DataFrame
+df = pd.DataFrame(data)
+
+# Save as Excel (or CSV if Excel locked)
+df.to_excel(output_excel, index=False)
+print(f"Filtered compound descriptor summary saved: {output_excel}")
+print(f"Total filtered compounds: {len(df)}")
